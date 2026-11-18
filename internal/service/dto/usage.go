@@ -10,7 +10,7 @@ const DefaultUsageEventsLimit = 100
 
 // UsageFilter 是服务层的 usage 查询条件。
 type UsageFilter struct {
-	// IncludeDeleted 仅由管理员 Analysis 的显式查询参数设置。
+	// IncludeDeleted 仅由管理员 Analysis 和 Overview 的显式查询参数设置：api_key_id 可指向已删除 Key，Analysis 同时包含历史 Key 汇总。
 	IncludeDeleted bool
 	Range          string
 	// RangeUnit/RangeCount 是统一时间解析器给出的规范化选择跨度，供不读取历史边界的查询复用。

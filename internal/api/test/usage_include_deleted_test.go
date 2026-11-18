@@ -131,6 +131,59 @@ func TestUsageAnalysisIncludeDeleted(t *testing.T) {
 	}
 }
 
+// 管理员按历史 Key ID 过滤 Overview 和 Analysis：默认拒绝已删除 Key，显式包含时只返回该 Key 的用量。
+func TestUsageAPIKeyFilterIncludeDeleted(t *testing.T) {
+	db := openAPITestDatabase(t)
+	keys := []entities.CPAAPIKey{
+		{ID: 41, APIKey: "test-active-123456"},
+		{ID: 42, APIKey: "test-deleted-654321", IsDeleted: true},
+	}
+	if err := db.Create(&keys).Error; err != nil {
+		t.Fatal(err)
+	}
+	bucket := timeutil.NormalizeStorageTime(time.Now()).Truncate(time.Hour).Add(-2 * time.Hour)
+	cost, unavailable := 1.0, int64(0)
+	for i, key := range keys {
+		tokens := int64(10 * (i + 1))
+		if err := db.Create(&entities.UsageOverviewHourlyStat{BucketStart: bucket, APIGroupKey: key.APIKey, Model: "model-a", RequestCount: 1, SuccessCount: 1, TotalTokens: tokens, CostUSD: &cost, UnavailableCostCount: &unavailable}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	snapshot, err := repository.LoadPricingSnapshot(context.Background(), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := keeperapi.NewRouter(nil, nil, service.NewUsageService(db, pricing.NewCatalog(snapshot)), nil, keeperapi.AuthConfig{}, nil, "", keeperapi.OptionalProviders{CPAAPIKeys: service.NewCPAAPIKeyService(db)})
+	query := "range=custom&unit=hour&start=" + url.QueryEscape(bucket.Add(-3*time.Hour).Format(time.RFC3339)) + "&end=" + url.QueryEscape(bucket.Add(time.Hour).Format(time.RFC3339)) + "&api_key_id=42"
+	for _, path := range []string{"/api/v1/usage/overview?", "/api/v1/usage/analysis?"} {
+		if response := serveAPIGet(router, path+query); response.Code == http.StatusOK {
+			t.Fatalf("%s resolved a deleted key without opt-in", path)
+		}
+	}
+	overview := serveAPIGet(router, "/api/v1/usage/overview?"+query+"&include_deleted=true")
+	var gotOverview struct {
+		Usage struct {
+			TotalTokens int64 `json:"total_tokens"`
+		} `json:"usage"`
+	}
+	if overview.Code != http.StatusOK || json.Unmarshal(overview.Body.Bytes(), &gotOverview) != nil || gotOverview.Usage.TotalTokens != 20 {
+		t.Fatalf("overview status=%d body=%s", overview.Code, overview.Body.String())
+	}
+	analysis := serveAPIGet(router, "/api/v1/usage/analysis?"+query+"&include_deleted=true")
+	var gotAnalysis struct {
+		APIKeys []struct {
+			Key         string `json:"key"`
+			TotalTokens int64  `json:"total_tokens"`
+		} `json:"api_key_composition"`
+	}
+	if analysis.Code != http.StatusOK || json.Unmarshal(analysis.Body.Bytes(), &gotAnalysis) != nil {
+		t.Fatalf("analysis status=%d", analysis.Code)
+	}
+	if len(gotAnalysis.APIKeys) != 1 || gotAnalysis.APIKeys[0].Key != "42" || gotAnalysis.APIKeys[0].TotalTokens != 20 {
+		t.Fatalf("analysis composition=%+v", gotAnalysis.APIKeys)
+	}
+}
+
 func TestCPAAPIKeySettingsIncludeDeleted(t *testing.T) {
 	db := openAPITestDatabase(t)
 	keys := []entities.CPAAPIKey{

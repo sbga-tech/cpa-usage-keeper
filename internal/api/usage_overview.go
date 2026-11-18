@@ -210,6 +210,8 @@ func registerUsageOverviewRoute(router gin.IRoutes, usageProvider service.UsageP
 			writeUsageFilterParseError(c, err)
 			return
 		}
+		// 汇总响应不含 Key 标识，只需允许 api_key_id 指向已删除 Key。
+		filter.IncludeDeleted = c.Query("include_deleted") == "true"
 		writeUsageOverviewResponse(c, usageProvider, filter)
 	})
 	router.GET("/usage/overview/comparisons", func(c *gin.Context) {

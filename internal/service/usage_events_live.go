@@ -19,7 +19,7 @@ type UsageEventsLiveProvider interface {
 }
 
 func (s *usageService) liveFilter(ctx context.Context, filter servicedto.UsageFilter) (repodto.UsageQueryFilter, error) {
-	key, err := s.resolveAPIGroupKey(ctx, filter.APIKeyID)
+	key, err := s.resolveAPIGroupKey(ctx, filter.APIKeyID, filter.IncludeDeleted)
 	return repodto.UsageQueryFilter{
 		Range: filter.Range, CustomUnit: filter.CustomUnit, StartTime: filter.StartTime,
 		EndTime: filter.EndTime, EndExclusive: filter.EndExclusive,

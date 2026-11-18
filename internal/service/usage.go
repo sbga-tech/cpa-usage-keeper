@@ -51,7 +51,8 @@ func usageServiceContext(ctx context.Context) context.Context {
 	return ctx
 }
 
-func (s *usageService) resolveAPIGroupKey(ctx context.Context, apiKeyID string) (string, error) {
+// resolveAPIGroupKey 默认只解析 active Key；includeDeleted 时也接受已删除 Key 的历史 ID。
+func (s *usageService) resolveAPIGroupKey(ctx context.Context, apiKeyID string, includeDeleted bool) (string, error) {
 	ctx = usageServiceContext(ctx)
 	apiKeyID = strings.TrimSpace(apiKeyID)
 	if apiKeyID == "" {
@@ -61,7 +62,11 @@ func (s *usageService) resolveAPIGroupKey(ctx context.Context, apiKeyID string) 
 	if err != nil || parsedID <= 0 {
 		return "", ErrInvalidID
 	}
-	apiKey, err := repository.FindActiveCPAAPIKeyByID(s.db.WithContext(ctx), parsedID)
+	find := repository.FindActiveCPAAPIKeyByID
+	if includeDeleted {
+		find = repository.FindCPAAPIKeyByID
+	}
+	apiKey, err := find(s.db.WithContext(ctx), parsedID)
 	if err != nil {
 		return "", err
 	}
@@ -71,7 +76,7 @@ func (s *usageService) resolveAPIGroupKey(ctx context.Context, apiKeyID string) 
 // GetUsageOverview 解析请求的 Key 范围后读取完整汇总桶与窄边界事件的已存费用，不重新计价。
 func (s *usageService) GetUsageOverview(ctx context.Context, filter servicedto.UsageFilter) (*servicedto.UsageOverviewSnapshot, error) {
 	ctx = usageServiceContext(ctx)
-	apiGroupKey, err := s.resolveAPIGroupKey(ctx, filter.APIKeyID)
+	apiGroupKey, err := s.resolveAPIGroupKey(ctx, filter.APIKeyID, filter.IncludeDeleted)
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +116,7 @@ func (s *usageService) GetUsageOverview(ctx context.Context, filter servicedto.U
 // GetUsageOverviewComparisons 按请求 Key 范围读取已存四维费用，比较与普通总览共用时间边界。
 func (s *usageService) GetUsageOverviewComparisons(ctx context.Context, filter servicedto.UsageFilter) (*servicedto.UsageOverviewSnapshot, error) {
 	ctx = usageServiceContext(ctx)
-	apiGroupKey, err := s.resolveAPIGroupKey(ctx, filter.APIKeyID)
+	apiGroupKey, err := s.resolveAPIGroupKey(ctx, filter.APIKeyID, filter.IncludeDeleted)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +139,7 @@ func (s *usageService) GetUsageOverviewComparisons(ctx context.Context, filter s
 // GetUsageActivity 用统一时间条件选择档位；today/yesterday 额外保留本地自然日边界。
 func (s *usageService) GetUsageActivity(ctx context.Context, filter servicedto.UsageFilter) (*servicedto.UsageActivitySnapshot, error) {
 	ctx = usageServiceContext(ctx)
-	apiGroupKey, err := s.resolveAPIGroupKey(ctx, filter.APIKeyID)
+	apiGroupKey, err := s.resolveAPIGroupKey(ctx, filter.APIKeyID, filter.IncludeDeleted)
 	if err != nil {
 		return nil, err
 	}
@@ -268,7 +273,7 @@ func usageActivityGrain(window servicedto.UsageActivityWindow) (entities.UsageAc
 // GetUsageOverviewRealtime 从近期缓存或窄窗事件读取已存费用，并保留实时请求与 Token 的原筛选口径。
 func (s *usageService) GetUsageOverviewRealtime(ctx context.Context, filter servicedto.UsageFilter) (*servicedto.UsageOverviewRealtime, error) {
 	ctx = usageServiceContext(ctx)
-	apiGroupKey, err := s.resolveAPIGroupKey(ctx, filter.APIKeyID)
+	apiGroupKey, err := s.resolveAPIGroupKey(ctx, filter.APIKeyID, filter.IncludeDeleted)
 	if err != nil {
 		return nil, err
 	}
@@ -500,7 +505,7 @@ func mapRealtimeCacheLevel(points []repodto.RealtimeCacheLevelPointRecord) []ser
 // GetAnalysis 在授权 Key 范围内读取已存小时／日费用；映射沿用原自然日、Token和身份视图。
 func (s *usageService) GetAnalysis(ctx context.Context, filter servicedto.UsageFilter) (*servicedto.AnalysisSnapshot, error) {
 	ctx = usageServiceContext(ctx)
-	apiGroupKey, err := s.resolveAPIGroupKey(ctx, filter.APIKeyID)
+	apiGroupKey, err := s.resolveAPIGroupKey(ctx, filter.APIKeyID, filter.IncludeDeleted)
 	if err != nil {
 		return nil, err
 	}
@@ -521,7 +526,7 @@ func (s *usageService) GetAnalysis(ctx context.Context, filter servicedto.UsageF
 
 func (s *usageService) GetAnalysisLatency(ctx context.Context, filter servicedto.UsageFilter) (*servicedto.AnalysisLatencyDiagnostics, error) {
 	ctx = usageServiceContext(ctx)
-	apiGroupKey, err := s.resolveAPIGroupKey(ctx, filter.APIKeyID)
+	apiGroupKey, err := s.resolveAPIGroupKey(ctx, filter.APIKeyID, filter.IncludeDeleted)
 	if err != nil {
 		return nil, err
 	}
@@ -690,7 +695,7 @@ func mapAnalysisCompositionRecord(item repodto.AnalysisCompositionRecord) servic
 // 每次调用固定当前价格 Snapshot 只显示风格，不按现价重算；NULL／非法费用错误向上返回。
 func (s *usageService) ListUsageEvents(ctx context.Context, filter servicedto.UsageFilter) (*servicedto.UsageEventsPage, error) {
 	ctx = usageServiceContext(ctx)
-	apiGroupKey, err := s.resolveAPIGroupKey(ctx, filter.APIKeyID)
+	apiGroupKey, err := s.resolveAPIGroupKey(ctx, filter.APIKeyID, filter.IncludeDeleted)
 	if err != nil {
 		return nil, err
 	}
@@ -763,7 +768,7 @@ func (s *usageService) ListUsageEvents(ctx context.Context, filter servicedto.Us
 // 每次导出固定当前 Snapshot 只显示风格；NULL／非法费用及 emit 错误向上返回。
 func (s *usageService) StreamUsageEvents(ctx context.Context, filter servicedto.UsageFilter, emit func(servicedto.UsageEventRecord) error) error {
 	ctx = usageServiceContext(ctx)
-	apiGroupKey, err := s.resolveAPIGroupKey(ctx, filter.APIKeyID)
+	apiGroupKey, err := s.resolveAPIGroupKey(ctx, filter.APIKeyID, filter.IncludeDeleted)
 	if err != nil {
 		return err
 	}

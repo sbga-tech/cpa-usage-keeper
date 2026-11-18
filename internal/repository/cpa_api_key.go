@@ -125,6 +125,13 @@ func FindActiveCPAAPIKeyByID(db *gorm.DB, id int64) (entities.CPAAPIKey, error) 
 	return row, err
 }
 
+// FindCPAAPIKeyByID 不限制删除状态，供管理员按历史 Key 查询用量。
+func FindCPAAPIKeyByID(db *gorm.DB, id int64) (entities.CPAAPIKey, error) {
+	var row entities.CPAAPIKey
+	err := db.Where("id = ?", id).First(&row).Error
+	return row, err
+}
+
 func FindActiveCPAAPIKeyByValue(db *gorm.DB, apiKey string) (entities.CPAAPIKey, error) {
 	var row entities.CPAAPIKey
 	// 该入口用于 API key 登录，插件的统计关联标识不能作为原生凭证。
